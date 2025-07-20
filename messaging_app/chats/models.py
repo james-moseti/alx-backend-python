@@ -3,7 +3,6 @@ from django.contrib.auth.models import AbstractUser
 from django.contrib.auth import get_user_model
 import uuid
 
-
 class User(AbstractUser):
     """
     Extended User model that extends Django's AbstractUser
@@ -15,15 +14,15 @@ class User(AbstractUser):
         ('admin', 'Admin'),
     ]
     
-    # Override the default id field to use UUID
-    id = models.UUIDField(
+    # Override the default id field to use UUID and alias it as user_id
+    user_id = models.UUIDField(
         primary_key=True, 
         default=uuid.uuid4, 
         editable=False,
         db_index=True
     )
     
-    # Django's AbstractUser already provides first_name, last_name, email
+    # Django's AbstractUser already provides first_name, last_name, email, password
     # We just need to make email unique and required
     email = models.EmailField(unique=True, null=False, blank=False)
     
@@ -49,6 +48,11 @@ class User(AbstractUser):
             models.Index(fields=['role']),
             models.Index(fields=['created_at']),
         ]
+    
+    @property
+    def id(self):
+        """Provide id property for compatibility"""
+        return self.user_id
     
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.email})"
