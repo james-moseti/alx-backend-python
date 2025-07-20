@@ -1,10 +1,11 @@
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Q, Prefetch
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from .models import Conversation, Message, MessageReadStatus
 from .serializers import (
     ConversationListSerializer,
@@ -25,6 +26,10 @@ class ConversationViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ConversationListSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['participants__username', 'participants__email']
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-updated_at']
     
     def get_queryset(self):
         """Return conversations where the current user is a participant"""
@@ -64,7 +69,11 @@ class ConversationViewSet(viewsets.ModelViewSet):
                     {"error": f"Users not found for emails: {list(missing_emails)}"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            participant_ids = list(users.values_list('user_id', flat=True))
+            participant_ids = list(users.values_list('id', flat=True))  # Use 'id' instead of 'user_id'
+        
+        # Add current user to participants if not already included
+        if request.user.id not in participant_ids:
+            participant_ids.append(request.user.id)
         
         # Prepare data for serializer
         data = {'participant_ids': participant_ids}
@@ -82,23 +91,34 @@ class ConversationViewSet(viewsets.ModelViewSet):
         """Add a participant to the conversation"""
         conversation = self.get_object()
         email = request.data.get('email')
+        user_id = request.data.get('user_id')
         
-        if not email:
+        if not email and not user_id:
             return Response(
-                {"error": "Email is required"}, 
+                {"error": "Either email or user_id is required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         try:
-            user = User.objects.get(email=email)
-            conversation.add_participant(user)
-            return Response(
-                {"message": f"User {email} added to conversation"},
-                status=status.HTTP_200_OK
-            )
+            if email:
+                user = User.objects.get(email=email)
+            else:
+                user = User.objects.get(id=user_id)
+                
+            if user not in conversation.participants.all():
+                conversation.participants.add(user)
+                return Response(
+                    {"message": f"User {user.email} added to conversation"},
+                    status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {"message": f"User {user.email} is already in this conversation"},
+                    status=status.HTTP_200_OK
+                )
         except User.DoesNotExist:
             return Response(
-                {"error": f"User with email {email} not found"},
+                {"error": "User not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
     
@@ -107,29 +127,34 @@ class ConversationViewSet(viewsets.ModelViewSet):
         """Remove a participant from the conversation"""
         conversation = self.get_object()
         email = request.data.get('email')
+        user_id = request.data.get('user_id')
         
-        if not email:
+        if not email and not user_id:
             return Response(
-                {"error": "Email is required"}, 
+                {"error": "Either email or user_id is required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         try:
-            user = User.objects.get(email=email)
+            if email:
+                user = User.objects.get(email=email)
+            else:
+                user = User.objects.get(id=user_id)
+                
             if user in conversation.participants.all():
-                conversation.remove_participant(user)
+                conversation.participants.remove(user)
                 return Response(
-                    {"message": f"User {email} removed from conversation"},
+                    {"message": f"User {user.email} removed from conversation"},
                     status=status.HTTP_200_OK
                 )
             else:
                 return Response(
-                    {"error": f"User {email} is not in this conversation"},
+                    {"error": f"User {user.email} is not in this conversation"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         except User.DoesNotExist:
             return Response(
-                {"error": f"User with email {email} not found"},
+                {"error": "User not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
     
@@ -156,6 +181,10 @@ class MessageViewSet(viewsets.ModelViewSet):
     """
     serializer_class = MessageSerializer
     permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['message_body', 'sender__username']
+    ordering_fields = ['sent_at']
+    ordering = ['-sent_at']
     
     def get_queryset(self):
         """Return messages for conversations where the current user is a participant"""
@@ -163,27 +192,23 @@ class MessageViewSet(viewsets.ModelViewSet):
             conversation__participants=self.request.user
         ).select_related('sender', 'conversation').distinct()
     
-    def get_serializer_class(self):
-        """Return MessageSerializer for all actions"""
-        return MessageSerializer
-    
     def create(self, request, *args, **kwargs):
         """
         Send a message to a conversation
-        Expected payload: {"conversation_id": "uuid", "message_body": "text"}
+        Expected payload: {"conversation": "uuid", "message_body": "text"}
         """
-        conversation_id = request.data.get('conversation_id')
+        conversation_id = request.data.get('conversation') or request.data.get('conversation_id')
         
         if not conversation_id:
             return Response(
-                {"error": "conversation_id is required"}, 
+                {"error": "conversation or conversation_id is required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         # Verify user is participant in the conversation
         try:
             conversation = Conversation.objects.get(
-                conversation_id=conversation_id,
+                id=conversation_id,
                 participants=request.user
             )
         except Conversation.DoesNotExist:
@@ -194,13 +219,14 @@ class MessageViewSet(viewsets.ModelViewSet):
         
         # Prepare data for serializer
         data = request.data.copy()
-        data['conversation'] = conversation_id  # Use conversation field from your serializer
+        data['conversation'] = conversation_id
+        data['sender'] = request.user.id
         
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         
-        # Save with conversation object
-        message = serializer.save(conversation=conversation)
+        # Save message
+        message = serializer.save(sender=request.user, conversation=conversation)
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
@@ -209,10 +235,18 @@ class MessageViewSet(viewsets.ModelViewSet):
         """Mark a message as read by the current user"""
         message = self.get_object()
         
+        # Don't mark own messages as read
+        if message.sender == request.user:
+            return Response(
+                {"message": "Cannot mark your own message as read"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         # Create or update read status
         read_status, created = MessageReadStatus.objects.get_or_create(
             message=message,
-            user=request.user
+            user=request.user,
+            defaults={'read_at': timezone.now()}
         )
         
         if created:
@@ -230,11 +264,20 @@ class MessageViewSet(viewsets.ModelViewSet):
     def unread(self, request):
         """Get all unread messages for the current user"""
         # Get messages where user is a participant but hasn't marked as read
+        # Exclude messages sent by the user themselves
         unread_messages = Message.objects.filter(
             conversation__participants=request.user
         ).exclude(
+            sender=request.user
+        ).exclude(
             read_statuses__user=request.user
         ).select_related('sender', 'conversation').distinct()
+        
+        # Pagination
+        page = self.paginate_queryset(unread_messages)
+        if page is not None:
+            serializer = MessageSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
         
         serializer = MessageSerializer(unread_messages, many=True, context={'request': request})
         return Response(serializer.data)
@@ -255,8 +298,8 @@ class MessageViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         
         # Set edited timestamp
-        from django.utils import timezone
         message.edited_at = timezone.now()
+        message.save(update_fields=['edited_at'])
         
         self.perform_update(serializer)
         return Response(serializer.data)
@@ -275,7 +318,6 @@ class MessageViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 
-# Additional view for bulk operations
 class ConversationBulkViewSet(viewsets.ViewSet):
     """
     ViewSet for bulk conversation operations
@@ -287,26 +329,30 @@ class ConversationBulkViewSet(viewsets.ViewSet):
         """Mark all messages in user's conversations as read"""
         user_conversations = Conversation.objects.filter(participants=request.user)
         
-        # Get all unread messages in user's conversations
+        # Get all unread messages in user's conversations (excluding own messages)
         unread_messages = Message.objects.filter(
             conversation__in=user_conversations
+        ).exclude(
+            sender=request.user
         ).exclude(
             read_statuses__user=request.user
         )
         
         # Create read statuses for all unread messages
         read_statuses_to_create = [
-            MessageReadStatus(message=message, user=request.user)
+            MessageReadStatus(message=message, user=request.user, read_at=timezone.now())
             for message in unread_messages
         ]
         
-        MessageReadStatus.objects.bulk_create(
-            read_statuses_to_create,
-            ignore_conflicts=True
-        )
+        created_count = len(read_statuses_to_create)
+        if created_count > 0:
+            MessageReadStatus.objects.bulk_create(
+                read_statuses_to_create,
+                ignore_conflicts=True
+            )
         
         return Response(
-            {"message": f"Marked {len(read_statuses_to_create)} messages as read"},
+            {"message": f"Marked {created_count} messages as read"},
             status=status.HTTP_200_OK
         )
     
@@ -316,7 +362,51 @@ class ConversationBulkViewSet(viewsets.ViewSet):
         unread_count = Message.objects.filter(
             conversation__participants=request.user
         ).exclude(
+            sender=request.user
+        ).exclude(
             read_statuses__user=request.user
         ).distinct().count()
         
         return Response({"unread_count": unread_count})
+    
+    @action(detail=False, methods=['get'])
+    def conversation_unread_counts(self, request):
+        """Get unread message counts per conversation"""
+        user_conversations = Conversation.objects.filter(participants=request.user)
+        
+        conversation_counts = []
+        for conversation in user_conversations:
+            unread_count = Message.objects.filter(
+                conversation=conversation
+            ).exclude(
+                sender=request.user
+            ).exclude(
+                read_statuses__user=request.user
+            ).count()
+            
+            conversation_counts.append({
+                'conversation_id': str(conversation.id),
+                'unread_count': unread_count
+            })
+        
+        return Response(conversation_counts)
+
+
+class UserViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for user operations (read-only for search/lookup)
+    """
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['username', 'email', 'first_name', 'last_name']
+    
+    def get_queryset(self):
+        """Return all users for search purposes"""
+        return User.objects.all().order_by('username')
+    
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Get current user's profile"""
+        serializer = UserProfileSerializer(request.user, context={'request': request})
+        return Response(serializer.data)
