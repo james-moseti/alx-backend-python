@@ -1,3 +1,322 @@
-from django.shortcuts import render
+from rest_framework import viewsets, status, permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from django.db.models import Q, Prefetch
+from django.contrib.auth import get_user_model
+from .models import Conversation, Message, MessageReadStatus
+from .serializers import (
+    ConversationListSerializer,
+    ConversationDetailSerializer, 
+    MessageSerializer,
+    UserSerializer,
+    UserProfileSerializer,
+    MessageReadStatusSerializer
+)
 
-# Create your views here.
+User = get_user_model()
+
+
+class ConversationViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling conversation operations
+    Provides CRUD operations for conversations
+    """
+    serializer_class = ConversationListSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return conversations where the current user is a participant"""
+        return Conversation.objects.filter(
+            participants=self.request.user
+        ).prefetch_related(
+            'participants',
+            Prefetch(
+                'messages',
+                queryset=Message.objects.select_related('sender').order_by('-sent_at')[:1],
+                to_attr='last_message_list'
+            )
+        ).distinct()
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer based on action"""
+        if self.action == 'retrieve':
+            return ConversationDetailSerializer
+        return ConversationListSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new conversation
+        Expected payload: {"participant_ids": ["uuid1", "uuid2"]} or {"participant_emails": ["email1@example.com", "email2@example.com"]}
+        """
+        # Handle both participant_ids and participant_emails for flexibility
+        participant_emails = request.data.get('participant_emails', [])
+        participant_ids = request.data.get('participant_ids', [])
+        
+        if participant_emails:
+            # Convert emails to user IDs
+            users = User.objects.filter(email__in=participant_emails)
+            if users.count() != len(participant_emails):
+                existing_emails = set(users.values_list('email', flat=True))
+                missing_emails = set(participant_emails) - existing_emails
+                return Response(
+                    {"error": f"Users not found for emails: {list(missing_emails)}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            participant_ids = list(users.values_list('user_id', flat=True))
+        
+        # Prepare data for serializer
+        data = {'participant_ids': participant_ids}
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        
+        conversation = serializer.save()
+        
+        # Return detailed conversation
+        response_serializer = ConversationDetailSerializer(conversation, context={'request': request})
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['post'])
+    def add_participant(self, request, pk=None):
+        """Add a participant to the conversation"""
+        conversation = self.get_object()
+        email = request.data.get('email')
+        
+        if not email:
+            return Response(
+                {"error": "Email is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email=email)
+            conversation.add_participant(user)
+            return Response(
+                {"message": f"User {email} added to conversation"},
+                status=status.HTTP_200_OK
+            )
+        except User.DoesNotExist:
+            return Response(
+                {"error": f"User with email {email} not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @action(detail=True, methods=['post'])
+    def remove_participant(self, request, pk=None):
+        """Remove a participant from the conversation"""
+        conversation = self.get_object()
+        email = request.data.get('email')
+        
+        if not email:
+            return Response(
+                {"error": "Email is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email=email)
+            if user in conversation.participants.all():
+                conversation.remove_participant(user)
+                return Response(
+                    {"message": f"User {email} removed from conversation"},
+                    status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {"error": f"User {email} is not in this conversation"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except User.DoesNotExist:
+            return Response(
+                {"error": f"User with email {email} not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    @action(detail=True, methods=['get'])
+    def messages(self, request, pk=None):
+        """Get all messages for a specific conversation"""
+        conversation = self.get_object()
+        messages = conversation.messages.select_related('sender').order_by('sent_at')
+        
+        # Pagination
+        page = self.paginate_queryset(messages)
+        if page is not None:
+            serializer = MessageSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = MessageSerializer(messages, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling message operations
+    Provides CRUD operations for messages
+    """
+    serializer_class = MessageSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return messages for conversations where the current user is a participant"""
+        return Message.objects.filter(
+            conversation__participants=self.request.user
+        ).select_related('sender', 'conversation').distinct()
+    
+    def get_serializer_class(self):
+        """Return MessageSerializer for all actions"""
+        return MessageSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """
+        Send a message to a conversation
+        Expected payload: {"conversation_id": "uuid", "message_body": "text"}
+        """
+        conversation_id = request.data.get('conversation_id')
+        
+        if not conversation_id:
+            return Response(
+                {"error": "conversation_id is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify user is participant in the conversation
+        try:
+            conversation = Conversation.objects.get(
+                conversation_id=conversation_id,
+                participants=request.user
+            )
+        except Conversation.DoesNotExist:
+            return Response(
+                {"error": "Conversation not found or you are not a participant"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Prepare data for serializer
+        data = request.data.copy()
+        data['conversation'] = conversation_id  # Use conversation field from your serializer
+        
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Save with conversation object
+        message = serializer.save(conversation=conversation)
+        
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        """Mark a message as read by the current user"""
+        message = self.get_object()
+        
+        # Create or update read status
+        read_status, created = MessageReadStatus.objects.get_or_create(
+            message=message,
+            user=request.user
+        )
+        
+        if created:
+            return Response(
+                {"message": "Message marked as read"},
+                status=status.HTTP_200_OK
+            )
+        else:
+            return Response(
+                {"message": "Message already marked as read"},
+                status=status.HTTP_200_OK
+            )
+    
+    @action(detail=False, methods=['get'])
+    def unread(self, request):
+        """Get all unread messages for the current user"""
+        # Get messages where user is a participant but hasn't marked as read
+        unread_messages = Message.objects.filter(
+            conversation__participants=request.user
+        ).exclude(
+            read_statuses__user=request.user
+        ).select_related('sender', 'conversation').distinct()
+        
+        serializer = MessageSerializer(unread_messages, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    def update(self, request, *args, **kwargs):
+        """Update a message (only sender can edit their own messages)"""
+        message = self.get_object()
+        
+        # Check if user is the sender
+        if message.sender != request.user:
+            return Response(
+                {"error": "You can only edit your own messages"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Update message
+        serializer = self.get_serializer(message, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        
+        # Set edited timestamp
+        from django.utils import timezone
+        message.edited_at = timezone.now()
+        
+        self.perform_update(serializer)
+        return Response(serializer.data)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete a message (only sender can delete their own messages)"""
+        message = self.get_object()
+        
+        # Check if user is the sender
+        if message.sender != request.user:
+            return Response(
+                {"error": "You can only delete your own messages"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        return super().destroy(request, *args, **kwargs)
+
+
+# Additional view for bulk operations
+class ConversationBulkViewSet(viewsets.ViewSet):
+    """
+    ViewSet for bulk conversation operations
+    """
+    permission_classes = [IsAuthenticated]
+    
+    @action(detail=False, methods=['post'])
+    def mark_all_read(self, request):
+        """Mark all messages in user's conversations as read"""
+        user_conversations = Conversation.objects.filter(participants=request.user)
+        
+        # Get all unread messages in user's conversations
+        unread_messages = Message.objects.filter(
+            conversation__in=user_conversations
+        ).exclude(
+            read_statuses__user=request.user
+        )
+        
+        # Create read statuses for all unread messages
+        read_statuses_to_create = [
+            MessageReadStatus(message=message, user=request.user)
+            for message in unread_messages
+        ]
+        
+        MessageReadStatus.objects.bulk_create(
+            read_statuses_to_create,
+            ignore_conflicts=True
+        )
+        
+        return Response(
+            {"message": f"Marked {len(read_statuses_to_create)} messages as read"},
+            status=status.HTTP_200_OK
+        )
+    
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        """Get count of unread messages for the current user"""
+        unread_count = Message.objects.filter(
+            conversation__participants=request.user
+        ).exclude(
+            read_statuses__user=request.user
+        ).distinct().count()
+        
+        return Response({"unread_count": unread_count})
