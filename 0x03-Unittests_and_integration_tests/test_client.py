@@ -108,8 +108,15 @@ class TestIntegrationGithubOrgClient(unittest.TestCase):
         repos_response = Mock()
         repos_response.json.return_value = cls.repos_payload
 
-        # Set side_effect to return appropriate responses
-        mock_get.side_effect = [org_response, repos_response]
+        # Set side_effect to return appropriate responses based on URL
+        def side_effect(url):
+            if "orgs" in url and not url.endswith("repos"):
+                return org_response
+            elif url.endswith("repos"):
+                return repos_response
+            return Mock()
+        
+        mock_get.side_effect = side_effect
 
     @classmethod
     def tearDownClass(cls):
