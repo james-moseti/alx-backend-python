@@ -207,3 +207,126 @@ class OffensiveLanguageMiddleware(MiddlewareMixin):
             timestamp for timestamp in self.ip_message_counts[ip_address]
             if timestamp > cutoff_time
         ]
+
+
+class RolePermissionMiddleware(MiddlewareMixin):
+    """
+    Middleware that checks the user's role (admin, moderator) before allowing access to specific actions.
+    Returns 403 Forbidden if user doesn't have required permissions.
+    """
+    
+    def __init__(self, get_response=None):
+        """Initialize the middleware with role-based access control."""
+        super().__init__(get_response)
+        self.get_response = get_response
+        
+        # Define protected paths that require admin/moderator access
+        self.protected_paths = [
+            '/admin/',
+            '/api/chats/users/',  # User management endpoints
+            '/api/chats/conversations/',  # Conversation management (for moderators)
+        ]
+        
+        # Define paths that require admin-only access
+        self.admin_only_paths = [
+            '/admin/',
+        ]
+    
+    def __call__(self, request):
+        """
+        Process the request and check user role permissions.
+        Returns 403 Forbidden if user doesn't have required role.
+        """
+        # Check if the request path requires role-based access control
+        if self._requires_permission_check(request):
+            # Check if user is authenticated
+            if not request.user.is_authenticated:
+                return JsonResponse(
+                    {
+                        'error': 'Authentication required',
+                        'message': 'You must be logged in to access this resource.'
+                    },
+                    status=401
+                )
+            
+            # Check if user has required role permissions
+            if not self._has_required_role(request):
+                return JsonResponse(
+                    {
+                        'error': 'Insufficient permissions',
+                        'message': 'You do not have the required role (admin or moderator) to access this resource.',
+                        'required_role': 'admin or moderator'
+                    },
+                    status=403
+                )
+        
+        # Continue processing the request
+        response = self.get_response(request)
+        return response
+    
+    def _requires_permission_check(self, request):
+        """
+        Check if the current request path requires role-based permission checking.
+        Returns True if permission check is needed, False otherwise.
+        """
+        request_path = request.path
+        
+        # Check if any protected path matches the current request path
+        for protected_path in self.protected_paths:
+            if request_path.startswith(protected_path):
+                return True
+        
+        return False
+    
+    def _has_required_role(self, request):
+        """
+        Check if the user has the required role (admin or moderator) for the requested resource.
+        Returns True if user has required permissions, False otherwise.
+        """
+        user = request.user
+        request_path = request.path
+        
+        # Check for admin-only paths
+        if any(request_path.startswith(path) for path in self.admin_only_paths):
+            return self._is_admin(user)
+        
+        # For other protected paths, check if user is admin or moderator
+        return self._is_admin(user) or self._is_moderator(user)
+    
+    def _is_admin(self, user):
+        """
+        Check if the user has admin role.
+        Returns True if user is admin, False otherwise.
+        """
+        # Check Django's built-in admin permissions
+        if user.is_superuser or user.is_staff:
+            return True
+        
+        # Check for custom admin role (if you have a custom role field)
+        if hasattr(user, 'role') and user.role == 'admin':
+            return True
+        
+        # Check for admin group membership
+        if user.groups.filter(name='admin').exists():
+            return True
+        
+        return False
+    
+    def _is_moderator(self, user):
+        """
+        Check if the user has moderator role.
+        Returns True if user is moderator, False otherwise.
+        """
+        # Check for custom moderator role (if you have a custom role field)
+        if hasattr(user, 'role') and user.role == 'moderator':
+            return True
+        
+        # Check for moderator group membership
+        if user.groups.filter(name='moderator').exists():
+            return True
+        
+        # Check for specific permissions that moderators might have
+        if user.has_perm('chats.moderate_conversations'):
+            return True
+        
+        return False
