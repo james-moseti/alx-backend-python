@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',  # JWT authentication
     'corsheaders',  # CORS support
     'drf_yasg',  # Swagger/OpenAPI documentation
+    'django_filters',
     'chats',
 ]
 # Custom User Model Configuration
