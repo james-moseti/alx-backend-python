@@ -209,7 +209,7 @@ class OffensiveLanguageMiddleware(MiddlewareMixin):
         ]
 
 
-class RolePermissionMiddleware(MiddlewareMixin):
+class RolepermissionMiddleware(MiddlewareMixin):
     """
     Middleware that checks the user's role (admin, moderator) before allowing access to specific actions.
     Returns 403 Forbidden if user doesn't have required permissions.
