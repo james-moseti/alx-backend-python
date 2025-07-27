@@ -104,17 +104,15 @@ SIMPLE_JWT = {
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',  # CORS
+    'corsheaders.middleware.CorsMiddleware',  # Add this if you plan to use CORS
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'chats.middleware.RestrictAccessByTimeMiddleware',  # time restriction middleware
-    'chats.middleware.OffensiveLanguageMiddleware',  # rate limiting middleware
-    'chats.middleware.RequestLoggingMiddleware', 
+    'chats.middleware.RestrictAccessByTimeMiddleware',  # Add time restriction middleware
+    'chats.middleware.RequestLoggingMiddleware',  # Add your custom middleware here
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-
 
 ROOT_URLCONF = 'messaging_app.urls'
 

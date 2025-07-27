@@ -1,8 +1,10 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils.deprecation import MiddlewareMixin
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
+from collections import defaultdict
+import time
 
 # Set up logger for request logging
 logger = logging.getLogger('chats.middleware')
@@ -105,3 +107,103 @@ class RestrictAccessByTimeMiddleware(MiddlewareMixin):
         
         # Check if current hour is within allowed range (9AM to 6PM)
         return self.start_hour <= current_hour < self.end_hour
+
+
+class OffensiveLanguageMiddleware(MiddlewareMixin):
+    """
+    Middleware that limits the number of chat messages a user can send within a certain time window,
+    based on their IP address. Implements rate limiting for POST requests (messages).
+    """
+    
+    def __init__(self, get_response=None):
+        """Initialize the middleware with rate limiting configuration."""
+        super().__init__(get_response)
+        self.get_response = get_response
+        
+        # Rate limiting configuration
+        self.max_messages = 5  # Maximum messages per time window
+        self.time_window = 60  # Time window in seconds (1 minute)
+        
+        # Dictionary to track message counts per IP
+        # Structure: {ip_address: [(timestamp1, timestamp2, ...], ...}
+        self.ip_message_counts = defaultdict(list)
+    
+    def __call__(self, request):
+        """
+        Process the request and implement rate limiting for POST requests.
+        Returns 429 Too Many Requests if limit is exceeded.
+        """
+        # Only apply rate limiting to POST requests (chat messages)
+        if request.method == 'POST':
+            client_ip = self._get_client_ip(request)
+            
+            # Check if IP has exceeded rate limit
+            if self._is_rate_limited(client_ip):
+                return JsonResponse(
+                    {
+                        'error': 'Rate limit exceeded',
+                        'message': f'You can only send {self.max_messages} messages per minute. Please wait before sending another message.',
+                        'retry_after': 60
+                    },
+                    status=429
+                )
+            
+            # Record this POST request for the IP
+            self._record_message(client_ip)
+        
+        # Continue processing the request
+        response = self.get_response(request)
+        return response
+    
+    def _get_client_ip(self, request):
+        """
+        Get the client's IP address from the request.
+        Handles cases where the request might be behind a proxy.
+        """
+        # Check for IP in various headers (for proxy scenarios)
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            # Take the first IP if there are multiple
+            ip = x_forwarded_for.split(',')[0].strip()
+        else:
+            # Get IP from REMOTE_ADDR
+            ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
+        
+        return ip
+    
+    def _is_rate_limited(self, ip_address):
+        """
+        Check if the IP address has exceeded the rate limit.
+        Returns True if rate limited, False otherwise.
+        """
+        current_time = time.time()
+        
+        # Get message timestamps for this IP
+        message_times = self.ip_message_counts[ip_address]
+        
+        # Remove old timestamps outside the time window
+        cutoff_time = current_time - self.time_window
+        self.ip_message_counts[ip_address] = [
+            timestamp for timestamp in message_times 
+            if timestamp > cutoff_time
+        ]
+        
+        # Check if current count exceeds limit
+        current_count = len(self.ip_message_counts[ip_address])
+        return current_count >= self.max_messages
+    
+    def _record_message(self, ip_address):
+        """
+        Record a new message timestamp for the given IP address.
+        """
+        current_time = time.time()
+        
+        # Add current timestamp to the IP's message list
+        self.ip_message_counts[ip_address].append(current_time)
+        
+        # Clean up old timestamps to prevent memory buildup
+        cutoff_time = current_time - self.time_window
+        self.ip_message_counts[ip_address] = [
+            timestamp for timestamp in self.ip_message_counts[ip_address]
+            if timestamp > cutoff_time
+        ]
