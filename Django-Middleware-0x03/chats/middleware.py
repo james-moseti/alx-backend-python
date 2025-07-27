@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
 from django.utils.deprecation import MiddlewareMixin
+from django.http import HttpResponse
+from django.utils import timezone
 
 # Set up logger for request logging
 logger = logging.getLogger('chats.middleware')
@@ -57,3 +59,49 @@ class RequestLoggingMiddleware(MiddlewareMixin):
         
         # Log the message
         logger.info(log_message)
+
+
+class RestrictAccessByTimeMiddleware(MiddlewareMixin):
+    """
+    Middleware that restricts access to the messaging app during certain hours.
+    Access is only allowed between 9AM (09:00) and 6PM (18:00).
+    """
+    
+    def __init__(self, get_response=None):
+        """Initialize the middleware."""
+        super().__init__(get_response)
+        self.get_response = get_response
+        # Define allowed hours (9AM to 6PM)
+        self.start_hour = 9  # 9AM
+        self.end_hour = 18   # 6PM
+    
+    def __call__(self, request):
+        """
+        Process the request and check if access is allowed during current time.
+        Returns 403 Forbidden if accessed outside allowed hours.
+        """
+        # Check if current time is within allowed hours
+        if not self._is_access_allowed():
+            return HttpResponse(
+                '<h1>403 Forbidden</h1>'
+                '<p>Access to the messaging application is restricted.</p>'
+                '<p>Please access the application between 9:00 AM and 6:00 PM.</p>',
+                status=403,
+                content_type='text/html'
+            )
+        
+        # Continue processing the request if time is allowed
+        response = self.get_response(request)
+        return response
+    
+    def _is_access_allowed(self):
+        """
+        Check if the current server time is within allowed hours.
+        Returns True if current time is between 9AM and 6PM, False otherwise.
+        """
+        # Get current server time
+        current_time = timezone.now()
+        current_hour = current_time.hour
+        
+        # Check if current hour is within allowed range (9AM to 6PM)
+        return self.start_hour <= current_hour < self.end_hour
