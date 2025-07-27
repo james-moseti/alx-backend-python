@@ -24,6 +24,32 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
         return obj.owner == request.user
 
 
+class IsParticipantOfConversation(permissions.BasePermission):
+    """
+    Custom permission to ensure only participants in a conversation 
+    can send, view, update and delete messages.
+    """
+
+    def has_permission(self, request, view):
+        """Check if user is authenticated."""
+        return request.user and request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        """
+        Check if user is a participant in the conversation.
+        Works for both Message and Conversation objects.
+        """
+        # For Message objects - check if user is participant in the conversation
+        if hasattr(obj, 'conversation'):
+            return obj.conversation.participants.filter(id=request.user.id).exists()
+        
+        # For Conversation objects - check if user is participant
+        if hasattr(obj, 'participants'):
+            return obj.participants.filter(id=request.user.id).exists()
+        
+        return False
+
+
 class IsMessageParticipant(permissions.BasePermission):
     """
     Custom permission to ensure users can only access messages 

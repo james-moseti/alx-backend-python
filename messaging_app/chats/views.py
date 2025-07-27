@@ -15,6 +15,7 @@ from .serializers import (
     UserProfileSerializer,
     MessageReadStatusSerializer
 )
+from .permissions import IsParticipantOfConversation
 
 User = get_user_model()
 
@@ -25,7 +26,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
     Provides CRUD operations for conversations
     """
     serializer_class = ConversationListSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsParticipantOfConversation]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['participants__username', 'participants__email']
     ordering_fields = ['created_at', 'updated_at']
@@ -180,7 +181,7 @@ class MessageViewSet(viewsets.ModelViewSet):
     Provides CRUD operations for messages
     """
     serializer_class = MessageSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsParticipantOfConversation]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['message_body', 'sender__username']
     ordering_fields = ['sent_at']
