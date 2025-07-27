@@ -31,6 +31,8 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
+# Application definition
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -39,10 +41,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework_simplejwt',  # Added for JWT authentication
+    'rest_framework_simplejwt',  # JWT authentication
+    'corsheaders',  # CORS support
+    'drf_yasg',  # Swagger/OpenAPI documentation
     'chats',
 ]
-
 # Custom User Model Configuration
 AUTH_USER_MODEL = 'chats.User'
 
@@ -50,6 +53,7 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT as primary
         'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication', 
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
