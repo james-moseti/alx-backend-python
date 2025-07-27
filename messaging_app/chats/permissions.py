@@ -20,7 +20,11 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
         if request.method in permissions.SAFE_METHODS:
             return True
 
-        # Write permissions are only allowed to the owner of the object.
+        # Write permissions (PUT, PATCH, DELETE) are only allowed to the owner of the object.
+        if request.method in ['PUT', 'PATCH', 'DELETE']:
+            return obj.owner == request.user
+        
+        # For POST and other methods, allow if user is owner
         return obj.owner == request.user
 
 
@@ -38,14 +42,31 @@ class IsParticipantOfConversation(permissions.BasePermission):
         """
         Check if user is a participant in the conversation.
         Works for both Message and Conversation objects.
+        Allows PUT, PATCH, DELETE for participants.
         """
         # For Message objects - check if user is participant in the conversation
         if hasattr(obj, 'conversation'):
-            return obj.conversation.participants.filter(id=request.user.id).exists()
+            is_participant = obj.conversation.participants.filter(id=request.user.id).exists()
+            
+            # Allow all operations (including PUT, PATCH, DELETE) for participants
+            if request.method in permissions.SAFE_METHODS:
+                return is_participant
+            elif request.method in ['PUT', 'PATCH', 'DELETE', 'POST']:
+                return is_participant
+            
+            return is_participant
         
         # For Conversation objects - check if user is participant
         if hasattr(obj, 'participants'):
-            return obj.participants.filter(id=request.user.id).exists()
+            is_participant = obj.participants.filter(id=request.user.id).exists()
+            
+            # Allow all operations for participants
+            if request.method in permissions.SAFE_METHODS:
+                return is_participant
+            elif request.method in ['PUT', 'PATCH', 'DELETE', 'POST']:
+                return is_participant
+            
+            return is_participant
         
         return False
 
@@ -64,15 +85,37 @@ class IsMessageParticipant(permissions.BasePermission):
         """
         Check if user is a participant in the conversation
         that contains this message.
+        Handles PUT, PATCH, DELETE operations.
         """
         # For Message objects
         if hasattr(obj, 'conversation'):
-            return obj.conversation.participants.filter(id=request.user.id).exists()
+            is_participant = obj.conversation.participants.filter(id=request.user.id).exists()
+            
+            # Allow read operations for participants
+            if request.method in permissions.SAFE_METHODS:
+                return is_participant
+            
+            # Allow write operations (PUT, PATCH, DELETE) for message sender or participants
+            elif request.method in ['PUT', 'PATCH', 'DELETE']:
+                is_sender = hasattr(obj, 'sender') and obj.sender == request.user
+                return is_sender or is_participant
+            
+            return is_participant
         
         # For objects that have a sender field (like Message)
         if hasattr(obj, 'sender'):
-            return obj.sender == request.user or \
-                   obj.conversation.participants.filter(id=request.user.id).exists()
+            is_sender = obj.sender == request.user
+            is_participant = obj.conversation.participants.filter(id=request.user.id).exists()
+            
+            # Allow read for participants
+            if request.method in permissions.SAFE_METHODS:
+                return is_participant
+            
+            # Allow write operations for sender or participants
+            elif request.method in ['PUT', 'PATCH', 'DELETE']:
+                return is_sender or is_participant
+            
+            return is_sender or is_participant
         
         return False
 
@@ -90,10 +133,19 @@ class IsConversationParticipant(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         """
         Check if user is a participant in the conversation.
+        Handles PUT, PATCH, DELETE operations.
         """
         # For Conversation objects
         if hasattr(obj, 'participants'):
-            return obj.participants.filter(id=request.user.id).exists()
+            is_participant = obj.participants.filter(id=request.user.id).exists()
+            
+            # Allow all operations for participants
+            if request.method in permissions.SAFE_METHODS:
+                return is_participant
+            elif request.method in ['PUT', 'PATCH', 'DELETE', 'POST']:
+                return is_participant
+            
+            return is_participant
         
         return False
 
@@ -110,20 +162,27 @@ class IsOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         """
         Check if user owns the object.
+        Handles PUT, PATCH, DELETE operations.
         """
+        is_owner = False
+        
         # For objects with owner field
         if hasattr(obj, 'owner'):
-            return obj.owner == request.user
-        
+            is_owner = obj.owner == request.user
         # For objects with user field
-        if hasattr(obj, 'user'):
-            return obj.user == request.user
-        
+        elif hasattr(obj, 'user'):
+            is_owner = obj.user == request.user
         # For objects with sender field
-        if hasattr(obj, 'sender'):
-            return obj.sender == request.user
+        elif hasattr(obj, 'sender'):
+            is_owner = obj.sender == request.user
         
-        return False
+        # Allow all operations for owners
+        if request.method in permissions.SAFE_METHODS:
+            return is_owner
+        elif request.method in ['PUT', 'PATCH', 'DELETE', 'POST']:
+            return is_owner
+        
+        return is_owner
 
 
 class CanCreateMessage(permissions.BasePermission):
@@ -150,6 +209,10 @@ class CanCreateMessage(permissions.BasePermission):
                 except Conversation.DoesNotExist:
                     return False
         
+        # Allow other methods (PUT, PATCH, DELETE) to be handled by object-level permissions
+        elif request.method in ['PUT', 'PATCH', 'DELETE']:
+            return True
+        
         return True
 
 
@@ -166,8 +229,17 @@ class CanViewConversation(permissions.BasePermission):
         """
         Check if user can view the conversation.
         Users can view conversations they participate in.
+        Handles PUT, PATCH, DELETE operations.
         """
-        return obj.participants.filter(id=request.user.id).exists()
+        is_participant = obj.participants.filter(id=request.user.id).exists()
+        
+        # Allow all operations for participants
+        if request.method in permissions.SAFE_METHODS:
+            return is_participant
+        elif request.method in ['PUT', 'PATCH', 'DELETE', 'POST']:
+            return is_participant
+        
+        return is_participant
 
 
 class IsAdminOrOwner(permissions.BasePermission):
@@ -182,21 +254,30 @@ class IsAdminOrOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         """
         Allow access to admin users or owners.
+        Handles PUT, PATCH, DELETE operations.
         """
         if request.user.is_staff or request.user.is_superuser:
             return True
         
+        is_owner = False
+        
         # Check ownership based on different field names
         if hasattr(obj, 'owner'):
-            return obj.owner == request.user
+            is_owner = obj.owner == request.user
         elif hasattr(obj, 'user'):
-            return obj.user == request.user
+            is_owner = obj.user == request.user
         elif hasattr(obj, 'sender'):
-            return obj.sender == request.user
+            is_owner = obj.sender == request.user
         elif hasattr(obj, 'participants'):
-            return obj.participants.filter(id=request.user.id).exists()
+            is_owner = obj.participants.filter(id=request.user.id).exists()
         
-        return False
+        # Allow all operations for admin or owners
+        if request.method in permissions.SAFE_METHODS:
+            return is_owner
+        elif request.method in ['PUT', 'PATCH', 'DELETE', 'POST']:
+            return is_owner
+        
+        return is_owner
 
 
 def get_user_conversations(user):
