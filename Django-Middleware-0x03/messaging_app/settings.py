@@ -108,6 +108,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'chats.middleware.RequestLoggingMiddleware',  # Add your custom middleware here
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -231,6 +232,10 @@ LOGGING = {
             'format': '{levelname} {message}',
             'style': '{',
         },
+        'request_format': {
+            'format': '{message}',
+            'style': '{',
+        },
     },
     'handlers': {
         'file': {
@@ -238,6 +243,12 @@ LOGGING = {
             'class': 'logging.FileHandler',
             'filename': LOGS_DIR / 'django.log',
             'formatter': 'verbose',
+        },
+        'requests_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': LOGS_DIR / 'requests.log',
+            'formatter': 'request_format',
         },
         'console': {
             'level': 'INFO',
@@ -258,6 +269,11 @@ LOGGING = {
         'chats': {
             'handlers': ['file', 'console'],
             'level': 'DEBUG',
+            'propagate': False,
+        },
+        'chats.middleware': {
+            'handlers': ['requests_file'],
+            'level': 'INFO',
             'propagate': False,
         },
     },
