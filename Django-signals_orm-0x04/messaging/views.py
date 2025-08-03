@@ -4,10 +4,12 @@ from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.contrib.auth import get_user_model
+from django.views.decorators.cache import cache_page
 from .models import Message, MessageHistory
 
 User = get_user_model()
 
+@cache_page(60)
 def message_history(request, message_id):
     """View to display edit history for a specific message"""
     message = get_object_or_404(Message, message_id=message_id)
@@ -47,6 +49,7 @@ def delete_user(request):
     
     return render(request, 'messaging/delete_user.html')
 
+@cache_page(60)
 def threaded_messages(request):
     """View to display threaded conversations with optimized queries"""
     # Get all root messages (messages without parent) with optimized queries
@@ -56,6 +59,7 @@ def threaded_messages(request):
         'root_messages': root_messages
     })
 
+@cache_page(60)
 def message_thread(request, message_id):
     """View to display a specific message thread with all replies"""
     message = get_object_or_404(
@@ -99,6 +103,7 @@ def unread_messages(request):
     })
 
 @login_required
+@cache_page(60)
 def inbox(request):
     """User inbox showing only unread messages with optimized query"""
     # Use custom manager with optimized query

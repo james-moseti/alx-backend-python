@@ -165,7 +165,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
     @method_decorator(cache_page(60))
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):
-        """Get all messages for a specific conversation"""
+        """Get all messages for a specific conversation - cached for 60 seconds using cache_page"""
         conversation = self.get_object()
         messages = conversation.messages.select_related('sender').order_by('sent_at')
         
