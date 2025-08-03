@@ -15,6 +15,10 @@ class Message(models.Model):
 
     def __str__(self):
         return f"Message from {self.sender} to {self.receiver}"
+    
+    def edited_by(self):
+        """Method to display edit history - required by tests"""
+        return self.history.all().order_by('-edited_at')
 
 class Notification(models.Model):
     notification_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
