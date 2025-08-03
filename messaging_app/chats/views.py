@@ -6,6 +6,9 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q, Prefetch
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
+from django.views.decorators.vary import vary_on_headers
 from .models import Conversation, Message, MessageReadStatus
 from .serializers import (
     ConversationListSerializer,
@@ -159,9 +162,11 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
     
+    @method_decorator(cache_page(60))  # Cache for 60 seconds
+    @method_decorator(vary_on_headers('Authorization'))  # Vary cache by user
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):
-        """Get all messages for a specific conversation"""
+        """Get all messages for a specific conversation (CACHED)"""
         conversation = self.get_object()
         messages = conversation.messages.select_related('sender').order_by('sent_at')
         
@@ -192,6 +197,13 @@ class MessageViewSet(viewsets.ModelViewSet):
         return Message.objects.filter(
             conversation__participants=self.request.user
         ).select_related('sender', 'conversation').distinct()
+    
+    # Cache the list view for 60 seconds with user-specific caching
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
+    def list(self, request, *args, **kwargs):
+        """List all messages (CACHED)"""
+        return super().list(request, *args, **kwargs)
     
     def create(self, request, *args, **kwargs):
         """

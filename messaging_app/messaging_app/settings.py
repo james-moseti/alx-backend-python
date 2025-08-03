@@ -31,8 +31,6 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
-# Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -48,6 +46,7 @@ INSTALLED_APPS = [
     'chats',
     'messaging',
 ]
+
 # Custom User Model Configuration
 AUTH_USER_MODEL = 'chats.User'
 
@@ -67,6 +66,14 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer',
     ]
+}
+
+# Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
 }
 
 # JWT Configuration
