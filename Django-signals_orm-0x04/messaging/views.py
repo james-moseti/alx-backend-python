@@ -100,14 +100,14 @@ def unread_messages(request):
 
 @login_required
 def inbox(request):
-    """User inbox showing only unread messages with .only() optimization"""
-    # Use custom manager with .only() to retrieve only necessary fields
-    unread_messages = Message.unread.for_user(request.user).only(
-        'message_id', 'content', 'timestamp', 'sender'
-    )
+    """User inbox showing only unread messages with optimized query"""
+    # Use custom manager with optimized query
+    unread_messages = Message.unread.optimized_for_user(request.user)
+    unread_count = Message.unread.unread_count(request.user)
     
     return render(request, 'messaging/inbox.html', {
-        'messages': unread_messages
+        'messages': unread_messages,
+        'unread_count': unread_count
     })
 
 @login_required
@@ -117,3 +117,37 @@ def mark_message_read(request, message_id):
     message.mark_as_read()
     
     return JsonResponse({'status': 'success', 'message': 'Message marked as read'})
+
+@login_required
+def mark_all_read(request):
+    """Mark all unread messages as read for the current user"""
+    Message.unread.for_user(request.user).update(read=True)
+    
+    return JsonResponse({'status': 'success', 'message': 'All messages marked as read'})
+
+@login_required
+def get_unread_count(request):
+    """API endpoint to get unread message count"""
+    count = Message.unread.unread_count(request.user)
+    
+    return JsonResponse({'unread_count': count})
+
+@login_required
+def bulk_mark_read(request):
+    """Mark multiple messages as read"""
+    if request.method == 'POST':
+        message_ids = request.POST.getlist('message_ids')
+        if message_ids:
+            messages_to_mark = Message.objects.filter(
+                message_id__in=message_ids,
+                receiver=request.user,
+                read=False
+            )
+            messages_to_mark.update(read=True)
+            
+            return JsonResponse({
+                'status': 'success', 
+                'message': f'{messages_to_mark.count()} messages marked as read'
+            })
+    
+    return JsonResponse({'status': 'error', 'message': 'Invalid request'})
