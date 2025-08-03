@@ -78,13 +78,14 @@ def message_thread(request, message_id):
 def optimized_messages(request):
     """View with specific optimization patterns for testing"""
     # Query with select_related for foreign keys and prefetch_related for reverse relations
+    # Use .only() to retrieve only necessary fields for optimization
     messages = Message.objects.filter(
         sender=request.user
     ).select_related(
         'sender', 'receiver'
     ).prefetch_related(
         'replies__sender', 'replies__receiver'
-    )
+    ).only('message_id', 'content', 'sender', 'receiver', 'sent_at')
     
     return render(request, 'messaging/optimized_messages.html', {
         'messages': messages
@@ -93,8 +94,8 @@ def optimized_messages(request):
 @login_required
 def unread_messages(request):
     """View to display unread messages using custom manager"""
-    # Use custom manager to get unread messages with optimization
-    unread_msgs = Message.unread.optimized_for_user(request.user)
+    # Use custom manager to get unread messages with optimization and .only() for field selection
+    unread_msgs = Message.unread.unread_for_user(request.user).only('message_id', 'content', 'sender', 'sent_at')
     unread_count = Message.unread.unread_count(request.user)
     
     return render(request, 'messaging/unread_messages.html', {
@@ -106,8 +107,8 @@ def unread_messages(request):
 @cache_page(60)
 def inbox(request):
     """User inbox showing only unread messages with optimized query"""
-    # Use custom manager with optimized query
-    unread_messages = Message.unread.optimized_for_user(request.user)
+    # Use custom manager with optimized query and .only() for field optimization
+    unread_messages = Message.unread.unread_for_user(request.user).only('message_id', 'content', 'sender', 'sent_at')
     unread_count = Message.unread.unread_count(request.user)
     
     return render(request, 'messaging/inbox.html', {
