@@ -162,7 +162,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
     
-    @cache_page(60)
+    @method_decorator(cache_page(60))
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):
         """Get all messages for a specific conversation"""
