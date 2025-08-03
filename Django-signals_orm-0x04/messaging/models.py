@@ -12,6 +12,7 @@ class Message(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     edited = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)
+    parent_message = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
 
     def __str__(self):
         return f"Message from {self.sender} to {self.receiver}"
@@ -19,6 +20,15 @@ class Message(models.Model):
     def edited_by(self):
         """Method to display edit history - required by tests"""
         return self.history.all().order_by('-edited_at')
+    
+    def get_all_replies(self):
+        """Recursively get all replies to this message"""
+        replies = []
+        direct_replies = self.replies.select_related('sender', 'receiver').prefetch_related('replies')
+        for reply in direct_replies:
+            replies.append(reply)
+            replies.extend(reply.get_all_replies())
+        return replies
 
 class Notification(models.Model):
     notification_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

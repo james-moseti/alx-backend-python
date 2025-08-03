@@ -46,3 +46,27 @@ def delete_user(request):
         return redirect('/')  # Redirect to homepage or login page
     
     return render(request, 'messaging/delete_user.html')
+
+def threaded_messages(request):
+    """View to display threaded conversations with optimized queries"""
+    # Get all root messages (messages without parent) with optimized queries
+    root_messages = Message.objects.filter(parent_message=None).select_related('sender', 'receiver').prefetch_related('replies__sender', 'replies__receiver')
+    
+    return render(request, 'messaging/threaded_messages.html', {
+        'root_messages': root_messages
+    })
+
+def message_thread(request, message_id):
+    """View to display a specific message thread with all replies"""
+    message = get_object_or_404(
+        Message.objects.select_related('sender', 'receiver').prefetch_related('replies'),
+        message_id=message_id
+    )
+    
+    # Get all replies recursively using ORM
+    all_replies = message.get_all_replies()
+    
+    return render(request, 'messaging/message_thread.html', {
+        'message': message,
+        'replies': all_replies
+    })
