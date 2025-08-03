@@ -85,3 +85,35 @@ def optimized_messages(request):
     return render(request, 'messaging/optimized_messages.html', {
         'messages': messages
     })
+
+@login_required
+def unread_messages(request):
+    """View to display unread messages using custom manager"""
+    # Use custom manager to get unread messages with optimization
+    unread_msgs = Message.unread.optimized_for_user(request.user)
+    unread_count = Message.unread.unread_count(request.user)
+    
+    return render(request, 'messaging/unread_messages.html', {
+        'unread_messages': unread_msgs,
+        'unread_count': unread_count
+    })
+
+@login_required
+def inbox(request):
+    """User inbox showing only unread messages with .only() optimization"""
+    # Use custom manager with .only() to retrieve only necessary fields
+    unread_messages = Message.unread.for_user(request.user).only(
+        'message_id', 'content', 'timestamp', 'sender'
+    )
+    
+    return render(request, 'messaging/inbox.html', {
+        'messages': unread_messages
+    })
+
+@login_required
+def mark_message_read(request, message_id):
+    """Mark a specific message as read"""
+    message = get_object_or_404(Message, message_id=message_id, receiver=request.user)
+    message.mark_as_read()
+    
+    return JsonResponse({'status': 'success', 'message': 'Message marked as read'})
