@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'drf_yasg',  # Swagger/OpenAPI documentation
     'django_filters',
     'chats',
+    'messaging',
 ]
 # Custom User Model Configuration
 AUTH_USER_MODEL = 'chats.User'
