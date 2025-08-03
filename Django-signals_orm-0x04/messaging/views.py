@@ -70,3 +70,18 @@ def message_thread(request, message_id):
         'message': message,
         'replies': all_replies
     })
+
+def optimized_messages(request):
+    """View with specific optimization patterns for testing"""
+    # Query with select_related for foreign keys and prefetch_related for reverse relations
+    messages = Message.objects.filter(
+        sender=request.user
+    ).select_related(
+        'sender', 'receiver'
+    ).prefetch_related(
+        'replies__sender', 'replies__receiver'
+    )
+    
+    return render(request, 'messaging/optimized_messages.html', {
+        'messages': messages
+    })
