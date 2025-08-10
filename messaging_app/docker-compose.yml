@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  web:
+    image: python:3.10
+    container_name: messaging_app_web
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      - DEBUG=1
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=${MYSQL_DB}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+
+  db:
+    image: mysql:5.7
+    container_name: messaging_app_db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql  # This line ensures data persistence across container restarts
+
+volumes:
+  mysql-data:  # This defines the volume 'mysql-data'
