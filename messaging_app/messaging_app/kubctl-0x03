@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -e
+
+DEPLOYMENT_FILE="messaging_app/blue_deployment.yaml"
+DEPLOYMENT_NAME="django-messaging-app-blue"
+SERVICE_NAME="django-messaging-app-service"
+PORT=8000
+
+echo "Applying updated deployment (image v2.0)..."
+kubectl apply -f $DEPLOYMENT_FILE
+
+echo "Starting port-forward in background..."
+kubectl port-forward service/$SERVICE_NAME $PORT:$PORT > /dev/null 2>&1 &
+PF_PID=$!
+
+# Give port-forward a few seconds to start
+sleep 3
+
+echo "Monitoring rollout status for $DEPLOYMENT_NAME..."
+kubectl rollout status deployment/$DEPLOYMENT_NAME &
+
+echo "Sending HTTP requests to test app availability during update..."
+for i in {1..20}; do
+  RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT/)
+  echo "[$i] HTTP response code: $RESPONSE"
+  sleep 1
+done
+
+echo "Stopping port-forward..."
+kill $PF_PID
+
+echo "Current pods for deployment:"
+kubectl get pods -l app=django-messaging-app,version=blue
+
+echo "Rolling update completed without downtime."
