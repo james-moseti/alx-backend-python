@@ -1,0 +1,33 @@
+#!/bin/bash
+
+set -e
+
+DEPLOYMENT_NAME=django-messaging-app
+SERVICE_NAME=django-messaging-service
+NAMESPACE=default  # change if using another namespace
+PORT=8000
+
+echo "Scaling deployment $DEPLOYMENT_NAME to 3 replicas..."
+kubectl scale deployment $DEPLOYMENT_NAME --replicas=3
+
+echo "Waiting for pods to be ready..."
+sleep 5
+kubectl get pods -l app=$DEPLOYMENT_NAME
+
+echo "Port-forwarding service to localhost:8000..."
+kubectl port-forward service/$SERVICE_NAME $PORT:$PORT &
+PORT_FORWARD_PID=$!
+
+# Wait a bit for port-forward to establish
+sleep 3
+
+echo "Running wrk load test (10 seconds)..."
+wrk http://localhost:$PORT --duration 10s --threads 2 --connections 10
+
+# Kill port-forward process
+kill $PORT_FORWARD_PID
+
+echo "Monitoring resource usage with kubectl top..."
+kubectl top pods
+
+echo "Done."
