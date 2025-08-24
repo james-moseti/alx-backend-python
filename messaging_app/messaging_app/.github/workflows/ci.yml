@@ -1,4 +1,4 @@
-name: Django CI (SQLite)
+name: Django CI (SQLite + Quality Checks)
 
 on:
   push:
@@ -23,13 +23,26 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r messaging_app/requirements.txt
+          pip install flake8 coverage
+
+      - name: Run flake8 linting
+        run: |
+          cd messaging_app
+          flake8 . --count --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Run migrations
         run: |
           cd messaging_app
           python manage.py migrate
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
           cd messaging_app
-          python manage.py test
+          coverage run manage.py test
+          coverage xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: messaging_app/coverage.xml
